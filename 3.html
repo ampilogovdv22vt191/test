@@ -1,0 +1,901 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Airflow DAG Monitor</title>
+  <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.10.0/font/bootstrap-icons.css">
+  <style>
+    body {
+      background-color: #f8f9fa;
+      font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+    }
+    
+    .dag-card {
+      border-radius: 0.75rem;
+      box-shadow: 0 4px 6px rgba(0, 0, 0, 0.05);
+      margin-bottom: 1rem;
+      background: white;
+      transition: all 0.3s ease;
+      cursor: pointer;
+      border-left: 4px solid #dee2e6;
+    }
+    .dag-card:hover {
+      transform: translateY(-2px);
+      box-shadow: 0 8px 12px rgba(0, 0, 0, 0.1);
+    }
+    .dag-card.status-running { border-left-color: #0d6efd; }
+    .dag-card.status-success { border-left-color: #198754; }
+    .dag-card.status-failed { border-left-color: #dc3545; }
+    .dag-card.status-queued { border-left-color: #ffc107; }
+    
+    .task-container {
+      max-height: 0;
+      overflow: hidden;
+      transition: max-height 0.4s ease;
+    }
+    .task-container.open {
+      max-height: 5000px;
+    }
+    
+    .task-item {
+      transition: all 0.2s;
+      border-radius: 0.5rem;
+      background: #f8f9fa;
+      padding: 0.75rem 1rem;
+      margin-bottom: 0.5rem;
+      border: 1px solid #e9ecef;
+    }
+    .task-item .task-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      cursor: pointer;
+    }
+    .task-item .task-details {
+      margin-top: 0.5rem;
+      padding-top: 0.5rem;
+      border-top: 1px solid #e9ecef;
+      font-size: 0.85rem;
+    }
+    .task-item .task-details .detail-row {
+      display: flex;
+      gap: 1.5rem;
+      flex-wrap: wrap;
+    }
+    .task-item .task-details .detail-item {
+      display: flex;
+      align-items: center;
+      gap: 0.25rem;
+      color: #7f8c8d;
+    }
+    .task-item .task-details .detail-item strong {
+      color: #2c3e50;
+    }
+    
+    .child-tasks-section {
+      margin-top: 1rem;
+      padding: 0.75rem 1rem 0.75rem 1.5rem;
+      border-left: 3px solid #6f42c1;
+      background: rgba(111, 66, 193, 0.03);
+      border-radius: 0.5rem;
+    }
+    .child-tasks-section .child-label {
+      font-size: 0.8rem;
+      color: #6f42c1;
+      font-weight: 600;
+      margin-bottom: 0.5rem;
+      display: flex;
+      align-items: center;
+      gap: 0.5rem;
+    }
+    .child-tasks-section .task-item {
+      background: white;
+      border-color: #e5d9f2;
+    }
+    
+    .child-dag-info {
+      background: rgba(111, 66, 193, 0.06);
+      border: 1px solid rgba(111, 66, 193, 0.12);
+      border-radius: 0.5rem;
+      padding: 0.75rem 1rem;
+      margin-top: 0.5rem;
+    }
+    .child-dag-info .child-header {
+      display: flex;
+      align-items: center;
+      gap: 0.5rem;
+      flex-wrap: wrap;
+    }
+    
+    .conf-block {
+      background: #1e1e1e;
+      color: #d4d4d4;
+      border-radius: 0.5rem;
+      padding: 1rem;
+      margin-top: 0.75rem;
+      font-size: 0.8rem;
+      font-family: 'Courier New', monospace;
+      white-space: pre-wrap;
+      max-height: 300px;
+      overflow-y: auto;
+      display: none;
+    }
+    .conf-block.show { display: block; }
+    
+    .dag-meta-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+      gap: 0.25rem 0.75rem;
+      margin-top: 0.25rem;
+    }
+    .dag-meta-grid .meta-item {
+      font-size: 0.8rem;
+      color: #7f8c8d;
+      display: flex;
+      align-items: center;
+      gap: 0.25rem;
+    }
+    
+    .loading-more {
+      text-align: center;
+      padding: 1.5rem;
+      color: #7f8c8d;
+    }
+    .scroll-trigger {
+      height: 20px;
+      visibility: hidden;
+    }
+    
+    .stat-card {
+      border-radius: 0.75rem;
+      border: none;
+      box-shadow: 0 4px 6px rgba(0, 0, 0, 0.05);
+      height: 100%;
+    }
+    .stat-card.running { border-left: 4px solid #0d6efd; }
+    .stat-card.success { border-left: 4px solid #198754; }
+    .stat-card.failed { border-left: 4px solid #dc3545; }
+    .stat-card.queued { border-left: 4px solid #ffc107; }
+    
+    .cancel-btn {
+      background: rgba(220, 53, 69, 0.1);
+      border: 1px solid rgba(220, 53, 69, 0.2);
+      color: #dc3545;
+      width: 28px;
+      height: 28px;
+      border-radius: 50%;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 0.8rem;
+      cursor: pointer;
+      transition: all 0.2s ease;
+    }
+    .cancel-btn:hover {
+      background: rgba(220, 53, 69, 0.2);
+      transform: scale(1.1);
+    }
+  </style>
+</head>
+<body>
+  <div class="container py-4">
+    <!-- ===== СТАТИСТИКА ===== -->
+    <div class="row g-3 mb-4">
+      <div class="col-md-3">
+        <div class="stat-card running p-3">
+          <div class="text-primary mb-1"><i class="bi bi-play-fill"></i></div>
+          <h3 class="text-primary mb-0" id="running-count">0</h3>
+          <p class="text-muted mb-0 small">Running</p>
+        </div>
+      </div>
+      <div class="col-md-3">
+        <div class="stat-card success p-3">
+          <div class="text-success mb-1"><i class="bi bi-check-circle-fill"></i></div>
+          <h3 class="text-success mb-0" id="success-count">0</h3>
+          <p class="text-muted mb-0 small">Success</p>
+        </div>
+      </div>
+      <div class="col-md-3">
+        <div class="stat-card failed p-3">
+          <div class="text-danger mb-1"><i class="bi bi-exclamation-triangle-fill"></i></div>
+          <h3 class="text-danger mb-0" id="failed-count">0</h3>
+          <p class="text-muted mb-0 small">Failed</p>
+        </div>
+      </div>
+      <div class="col-md-3">
+        <div class="stat-card queued p-3">
+          <div class="text-warning mb-1"><i class="bi bi-hourglass"></i></div>
+          <h3 class="text-warning mb-0" id="queued-count">0</h3>
+          <p class="text-muted mb-0 small">Queued</p>
+        </div>
+      </div>
+    </div>
+
+    <!-- ===== СПИСОК DAG RUNS ===== -->
+    <div class="d-flex justify-content-between align-items-center mb-3">
+      <h5 class="mb-0"><i class="bi bi-lightning-charge text-primary me-2"></i>Active DAG Runs</h5>
+      <button class="btn btn-sm btn-outline-primary" onclick="loadActiveDagsWithPagination(true)">
+        <i class="bi bi-arrow-clockwise"></i> Refresh
+      </button>
+    </div>
+
+    <div id="dag-list">
+      <div class="text-center py-5" id="loadingIndicator">
+        <div class="spinner-border text-primary"></div>
+        <p class="text-muted mt-2">Загрузка DAG Runs...</p>
+      </div>
+    </div>
+    
+    <div id="scrollTrigger" class="scroll-trigger"></div>
+    <div id="loadingMoreIndicator" class="loading-more" style="display:none;">
+      <div class="spinner-border spinner-border-sm text-primary me-2"></div>
+      Loading more...
+    </div>
+  </div>
+
+  <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
+  <script>
+    // ================================================================
+    // ===== КОНФИГУРАЦИЯ =====
+    // ================================================================
+    const API_CONFIG = {
+      baseUrl: '/api/v1/',
+      headers: {
+        'Accept': 'application/json',
+        'Content-Type': 'application/json'
+      }
+    };
+
+    // ================================================================
+    // ===== ПЕРЕМЕННЫЕ СОСТОЯНИЯ =====
+    // ================================================================
+    let choosedDagId = 'qwe';
+    const ArmDagId = 'qwe';
+    const CrawDagId = 'qwe_gid';
+    let activeOffset = 0;
+    let activeLimit = 20;
+    let activeTotal = 0;
+    let activeLoading = false;
+    let activeHasMore = true;
+    let accessToken = null;
+
+    // ===== НОВОЕ: УНИКАЛЬНЫЙ СЧЕТЧИК ДЛЯ ID ЭЛЕМЕНТОВ =====
+    // Используется чтобы избежать конфликта ID при одинаковых task_id
+    let uniqueIdCounter = 0;
+
+    // ================================================================
+    // ===== ВСПОМОГАТЕЛЬНЫЕ ФУНКЦИИ =====
+    // ================================================================
+    function formatDateTime(dateString) {
+      if (!dateString) return 'N/A';
+      const date = new Date(dateString);
+      return date.toLocaleString();
+    }
+
+    function formatDuration(seconds) {
+      if (!seconds) return 'N/A';
+      const hours = Math.floor(seconds / 3600);
+      const minutes = Math.floor((seconds % 3600) / 60);
+      const secs = Math.floor(seconds % 60);
+      return [hours > 0 ? `${hours}h` : null,
+        minutes > 0 ? `${minutes}m` : null,
+        `${secs}s`].filter(Boolean).join(' ');
+    }
+
+    function getStatusBadgeClass(state) {
+      const classes = {
+        running: 'bg-primary bg-opacity-10 text-primary',
+        success: 'bg-success bg-opacity-10 text-success',
+        failed: 'bg-danger bg-opacity-10 text-danger',
+        queued: 'bg-warning bg-opacity-10 text-warning',
+        upstream_failed: 'bg-danger bg-opacity-10 text-danger',
+        skipped: 'bg-secondary bg-opacity-10 text-secondary',
+        scheduled: 'bg-info bg-opacity-10 text-info',
+        up_for_retry: 'bg-warning bg-opacity-10 text-warning',
+        up_for_reschedule: 'bg-warning bg-opacity-10 text-warning',
+        deferred: 'bg-secondary bg-opacity-10 text-secondary',
+        removed: 'bg-danger bg-opacity-10 text-danger',
+        restarting: 'bg-primary bg-opacity-10 text-primary'
+      };
+      return classes[state] || 'bg-secondary bg-opacity-10 text-secondary';
+    }
+
+    function getTaskStateInfo(state) {
+      const states = {
+        success: { icon: "bi-check-circle-fill", color: "text-success" },
+        running: { icon: "bi-play-fill", color: "text-primary" },
+        failed: { icon: "bi-exclamation-triangle-fill", color: "text-danger" },
+        queued: { icon: "bi-hourglass", color: "text-warning" },
+        upstream_failed: { icon: "bi-arrow-left-circle-fill", color: "text-danger" },
+        skipped: { icon: "bi-skip-forward-circle-fill", color: "text-secondary" },
+        scheduled: { icon: "bi-clock", color: "text-info" },
+        up_for_retry: { icon: "bi-arrow-repeat", color: "text-warning" },
+        up_for_reschedule: { icon: "bi-calendar-event", color: "text-warning" },
+        deferred: { icon: "bi-pause-circle", color: "text-secondary" },
+        removed: { icon: "bi-x-circle", color: "text-danger" },
+        restarting: { icon: "bi-arrow-clockwise", color: "text-primary" }
+      };
+      return states[state] || { icon: "bi-question-circle", color: "text-muted" };
+    }
+
+    function getTriggerType(dagRun) {
+      if (dagRun.external_trigger === true) {
+        if (dagRun.conf && dagRun.conf.parent_dag_id) {
+          return { type: 'parent', label: 'Parent', icon: 'bi-diagram-3' };
+        }
+        return { type: 'manual', label: 'Manual', icon: 'bi-hand-index' };
+      }
+      return { type: 'scheduled', label: 'Scheduled', icon: 'bi-clock' };
+    }
+
+    function getStatusIcon(state) {
+      const map = {
+        running: 'bi-play-fill text-primary',
+        success: 'bi-check-circle-fill text-success',
+        failed: 'bi-exclamation-triangle-fill text-danger',
+        queued: 'bi-hourglass text-warning'
+      };
+      return map[state] || 'bi-question-circle text-muted';
+    }
+
+    // ================================================================
+    // ===== API ФУНКЦИИ =====
+    // ================================================================
+    async function getToken() {
+      // Твоя реализация получения токена (есть в другом файле)
+      if (!accessToken) {
+        const response = await fetch('/api/token');
+        const data = await response.json();
+        accessToken = data.access_token;
+      }
+      return accessToken;
+    }
+
+    async function fetchApi(endpoint, method = 'GET') {
+      const option = {
+        method,
+        headers: API_CONFIG.headers,
+      };
+
+      if (!accessToken) {
+        await getToken();
+      }
+
+      option.headers["Authorization"] = `Bearer ${accessToken}`;
+
+      try {
+        const response = await fetch(endpoint, option);
+        if (!response.ok) {
+          throw new Error(`API request failed with status ${response.status}`);
+        }
+        return await response.json();
+      } catch (error) {
+        console.error('API request error:', error);
+        throw error;
+      }
+    }
+
+    // Получение детальной информации о DAG Run (с conf)
+    async function fetchDagRunDetail(dagId, dagRunId) {
+      const endpoint = `${API_CONFIG.baseUrl}dags/${encodeURIComponent(dagId)}/dagRuns/${encodeURIComponent(dagRunId)}`;
+      return await fetchApi(endpoint);
+    }
+
+    // Получение задач DAG Run
+    async function fetchTasks(dagId, dagRunId) {
+      const endpoint = `${API_CONFIG.baseUrl}dags/${encodeURIComponent(dagId)}/dagRuns/${encodeURIComponent(dagRunId)}/taskInstances`;
+      const response = await fetchApi(endpoint);
+      return response.task_instances || [];
+    }
+
+    // Получение всех DAG Runs для конкретного DAG-а (с пагинацией)
+    async function fetchAllDagRunsForSpecificDag(dag_id) {
+      let allRuns = [];
+      let offset = 0;
+      const limit = 100;
+      let hasMore = true;
+      
+      while (hasMore) {
+        const endpoint = `${API_CONFIG.baseUrl}dags/${dag_id}/dagRuns?limit=${limit}&offset=${offset}`;
+        const response = await fetchApi(endpoint);
+        const runs = response.dag_runs || [];
+        allRuns = [...allRuns, ...runs];
+        
+        hasMore = runs.length === limit;
+        offset += limit;
+      }
+      
+      return allRuns;
+    }
+
+    // ================================================================
+    // ===== ПОИСК CHILD DAG RUN =====
+    // ================================================================
+    // ID дочерних DAG-ов (укажи свои)
+    const CHILD_DAG_IDS = ['data_processing_child', 'warehouse_loader_child'];
+
+    async function findChildDagRuns(parentDagId, parentDagRunId) {
+      try {
+        for (const childDagId of CHILD_DAG_IDS) {
+          const childDagRuns = await fetchAllDagRunsForSpecificDag(childDagId);
+          
+          const childRun = childDagRuns.find(run => {
+            const conf = run.conf || {};
+            return (
+              (conf.parent_dag_id === parentDagId || conf.triggered_by_dag_id === parentDagId) &&
+              (conf.parent_run_id === parentDagRunId || conf.triggered_by_run_id === parentDagRunId)
+            );
+          });
+          
+          if (childRun) {
+            return childRun;
+          }
+        }
+        
+        return null;
+      } catch (error) {
+        console.error('Error finding child DAG runs:', error);
+        return null;
+      }
+    }
+
+    // ================================================================
+    // ===== НОВАЯ ФУНКЦИЯ: ГЕНЕРАЦИЯ УНИКАЛЬНОГО ID =====
+    // ===== Используется чтобы избежать конфликта при одинаковых task_id =====
+    // ================================================================
+    function generateUniqueId(prefix) {
+      uniqueIdCounter++;
+      return `${prefix}-${uniqueIdCounter}`;
+    }
+
+    // ================================================================
+    // ===== ОБНОВЛЕННАЯ ФУНКЦИЯ: РЕНДЕРИНГ ОДНОЙ КАРТОЧКИ =====
+    // ===== ИЗМЕНЕНО: убраны все запросы при рендеринге =====
+    // ================================================================
+    function renderSingleDagCard(dag) {
+      const statusClass = `status-${dag.state}`;
+      const statusIcons = {
+        running: 'bi-play-fill text-primary',
+        success: 'bi-check-circle-fill text-success',
+        failed: 'bi-exclamation-triangle-fill text-danger',
+        queued: 'bi-hourglass text-warning'
+      };
+
+      const vendor = dag.vendor || dag.dag_id.split('_')[0] || 'DAG';
+      const model = dag.model || dag.dag_id.split('_').slice(1).join('_') || '';
+
+      let durationText = 'N/A';
+      if (dag.start_date && dag.end_date) {
+        durationText = formatDuration((new Date(dag.end_date) - new Date(dag.start_date)) / 1000);
+      } else if (dag.start_date) {
+        durationText = 'Running...';
+      }
+
+      // ===== ГЕНЕРИРУЕМ УНИКАЛЬНЫЙ ID ДЛЯ ЭТОЙ КАРТОЧКИ =====
+      const cardUniqueId = generateUniqueId('dag-card');
+
+      const dagItem = document.createElement('div');
+      dagItem.id = cardUniqueId;
+      dagItem.className = 'list-group-item p-0 border-0 mb-2';
+
+      const dagCard = document.createElement('div');
+      dagCard.className = `dag-card p-3 ${statusClass}`;
+
+      // ===== ВЕРХНЯЯ ЧАСТЬ КАРТОЧКИ =====
+      dagCard.innerHTML = `
+        <div class="d-flex justify-content-between align-items-start">
+          <div style="flex:1;">
+            <div class="d-flex align-items-center gap-2 flex-wrap">
+              <h5 class="fw-bold mb-1">
+                <i class="bi ${statusIcons[dag.state] || 'bi-question-circle'} me-2"></i>
+                ${vendor} ${model}
+              </h5>
+              <span class="badge ${getStatusBadgeClass(dag.state)}">${dag.state.toUpperCase()}</span>
+            </div>
+
+            <div class="dag-meta-grid">
+              <span class="meta-item"><i class="bi bi-hash"></i>${dag.dag_run_id}</span>
+              <span class="meta-item"><i class="bi bi-clock"></i>Начато: ${formatDateTime(dag.start_date)}</span>
+              ${dag.end_date ? `<span class="meta-item"><i class="bi bi-stopwatch"></i>Закончено: ${formatDateTime(dag.end_date)}</span>` : ''}
+              <span class="meta-item"><i class="bi bi-hourglass-split"></i>Длительность: ${durationText}</span>
+            </div>
+          </div>
+
+          <div class="d-flex align-items-center gap-2">
+            ${dag.state === 'running' || dag.state === 'queued' ? `
+              <div class="cancel-btn" onclick="event.stopPropagation(); cancelDagRun('${dag.dag_id}', '${dag.dag_run_id}', '${vendor}', '${model}')" title="Отменить выполнение">
+                <i class="bi bi-x"></i>
+              </div>
+            ` : ''}
+          </div>
+        </div>
+      `;
+
+      // ===== КОНТЕЙНЕР ДЛЯ ДЕТАЛЕЙ =====
+      const taskContainer = document.createElement('div');
+      taskContainer.className = 'task-container';
+      // ===== ИЗМЕНЕНО: используем уникальный ID =====
+      taskContainer.id = `tasks-${cardUniqueId}`;
+
+      // ===== ОБРАБОТЧИК КЛИКА =====
+      dagCard.addEventListener('click', async () => {
+        // Закрываем все открытые карточки
+        document.querySelectorAll('.task-container.open').forEach(el => {
+          if (el.id !== taskContainer.id) {
+            el.classList.remove('open');
+          }
+        });
+
+        const isOpen = taskContainer.classList.contains('open');
+        taskContainer.classList.toggle('open');
+
+        // Загружаем данные только при первом открытии
+        if (!isOpen && taskContainer.dataset.loaded !== 'true') {
+          await loadDagCardContent(dag, taskContainer, cardUniqueId);
+          taskContainer.dataset.loaded = 'true';
+        }
+      });
+
+      dagItem.appendChild(dagCard);
+      dagItem.appendChild(taskContainer);
+      return dagItem;
+    }
+
+    // ================================================================
+    // ===== ОБНОВЛЕННАЯ ФУНКЦИЯ: ЗАГРУЗКА СОДЕРЖИМОГО КАРТОЧКИ =====
+    // ===== ИЗМЕНЕНО: использует уникальные ID для задач =====
+    // ================================================================
+    async function loadDagCardContent(dag, container, cardUniqueId) {
+      // Показываем спиннер
+      container.innerHTML = `
+        <div class="p-3 border-top text-center">
+          <div class="spinner-border spinner-border-sm text-primary"></div>
+          <p class="text-muted mt-2 mb-0">Загрузка данных...</p>
+        </div>
+      `;
+
+      try {
+        // ===== ЗАГРУЖАЕМ ВСЁ ПАРАЛЛЕЛЬНО =====
+        const [tasks, childRun, detail] = await Promise.all([
+          fetchTasks(dag.dag_id, dag.dag_run_id),
+          findChildDagRuns(dag.dag_id, dag.dag_run_id),
+          fetchDagRunDetail(dag.dag_id, dag.dag_run_id)
+        ]);
+
+        // Если есть Child — грузим его задачи
+        let childTasks = [];
+        if (childRun) {
+          childTasks = await fetchTasks(childRun.dag_id, childRun.dag_run_id);
+        }
+
+        // ===== ОТРИСОВЫВАЕМ =====
+        let html = `<div class="p-3 border-top">`;
+
+        // --- Задачи родителя ---
+        html += `
+          <div class="mb-3">
+            <div class="d-flex align-items-center gap-2 mb-2">
+              <i class="bi bi-list-task text-primary"></i>
+              <strong>Tasks (${tasks.length})</strong>
+            </div>
+        `;
+        if (tasks.length > 0) {
+          tasks.forEach((task, index) => {
+            const stateInfo = getTaskStateInfo(task.state);
+            // ===== ИЗМЕНЕНО: уникальный ID на основе cardUniqueId + index =====
+            const detailId = `${cardUniqueId}-task-${index}`;
+            html += `
+              <div class="task-item">
+                <div class="task-header" onclick="event.stopPropagation(); toggleTaskDetails('${detailId}')">
+                  <div>
+                    <i class="bi ${stateInfo.icon} ${stateInfo.color} me-2"></i>
+                    <strong>${task.task_id}</strong>
+                    ${task.task_type ? `<span class="text-muted small ms-2">(${task.task_type})</span>` : ''}
+                  </div>
+                  <div>
+                    <span class="badge ${getStatusBadgeClass(task.state)}">${task.state.toUpperCase()}</span>
+                    <i class="bi bi-chevron-down ms-1"></i>
+                  </div>
+                </div>
+                <div class="task-details" id="${detailId}" style="display:none;">
+                  <div class="detail-row">
+                    <span class="detail-item"><i class="bi bi-clock"></i> <strong>Duration:</strong> ${formatDuration(task.duration)}</span>
+                    <span class="detail-item"><i class="bi bi-arrow-repeat"></i> <strong>Attempts:</strong> ${task.try_number || 0}</span>
+                    ${task.pool ? `<span class="detail-item"><i class="bi bi-water"></i> <strong>Pool:</strong> ${task.pool}</span>` : ''}
+                    ${task.queue ? `<span class="detail-item"><i class="bi bi-hdd-stack"></i> <strong>Queue:</strong> ${task.queue}</span>` : ''}
+                  </div>
+                  <div class="detail-row mt-1">
+                    <span class="detail-item"><i class="bi bi-play-circle"></i> <strong>Started:</strong> ${formatDateTime(task.start_date)}</span>
+                    <span class="detail-item"><i class="bi bi-stop-circle"></i> <strong>Ended:</strong> ${formatDateTime(task.end_date)}</span>
+                  </div>
+                </div>
+              </div>
+            `;
+          });
+        } else {
+          html += `<div class="text-muted small">No tasks</div>`;
+        }
+        html += `</div>`;
+
+        // --- Child DAG ---
+        if (childRun) {
+          const childStatusIcon = getStatusIcon(childRun.state);
+          html += `
+            <div class="child-dag-info">
+              <div class="child-header">
+                <i class="bi bi-diagram-3 text-primary"></i>
+                <strong>Child DAG:</strong>
+                <span class="fw-medium">${childRun.dag_id}</span>
+                <i class="bi ${childStatusIcon} ms-1"></i>
+                <span class="badge ${getStatusBadgeClass(childRun.state)}">${childRun.state.toUpperCase()}</span>
+                <span class="text-muted small ms-2">${childRun.dag_run_id}</span>
+              </div>
+              <div class="small text-muted mt-1">
+                <span><i class="bi bi-calendar me-1"></i>${formatDateTime(childRun.execution_date)}</span>
+                ${childRun.start_date ? ` | <i class="bi bi-clock me-1"></i>Started: ${formatDateTime(childRun.start_date)}` : ''}
+              </div>
+            </div>
+
+            <div class="child-tasks-section">
+              <div class="child-label">
+                <i class="bi bi-diagram-3"></i>
+                Child Tasks (${childTasks.length})
+              </div>
+              ${childTasks.length > 0 ? childTasks.map((task, index) => {
+                const stateInfo = getTaskStateInfo(task.state);
+                // ===== ИЗМЕНЕНО: уникальный ID для child задач =====
+                const detailId = `${cardUniqueId}-child-task-${index}`;
+                return `
+                  <div class="task-item">
+                    <div class="task-header" onclick="event.stopPropagation(); toggleTaskDetails('${detailId}')">
+                      <div>
+                        <i class="bi ${stateInfo.icon} ${stateInfo.color} me-2"></i>
+                        <strong>${task.task_id}</strong>
+                        ${task.task_type ? `<span class="text-muted small ms-2">(${task.task_type})</span>` : ''}
+                      </div>
+                      <div>
+                        <span class="badge ${getStatusBadgeClass(task.state)}">${task.state.toUpperCase()}</span>
+                        <i class="bi bi-chevron-down ms-1"></i>
+                      </div>
+                    </div>
+                    <div class="task-details" id="${detailId}" style="display:none;">
+                      <div class="detail-row">
+                        <span class="detail-item"><i class="bi bi-clock"></i> <strong>Duration:</strong> ${formatDuration(task.duration)}</span>
+                        <span class="detail-item"><i class="bi bi-arrow-repeat"></i> <strong>Attempts:</strong> ${task.try_number || 0}</span>
+                      </div>
+                      <div class="detail-row mt-1">
+                        <span class="detail-item"><i class="bi bi-play-circle"></i> <strong>Started:</strong> ${formatDateTime(task.start_date)}</span>
+                        <span class="detail-item"><i class="bi bi-stop-circle"></i> <strong>Ended:</strong> ${formatDateTime(task.end_date)}</span>
+                      </div>
+                    </div>
+                  </div>
+                `;
+              }).join('') : '<div class="text-muted small">No tasks</div>'}
+            </div>
+          `;
+        }
+
+        // --- Конфигурация ---
+        if (detail && detail.conf && Object.keys(detail.conf).length > 0) {
+          // ===== ИЗМЕНЕНО: уникальный ID для conf =====
+          const confId = `${cardUniqueId}-conf`;
+          html += `
+            <div class="mt-3">
+              <button class="btn btn-sm btn-outline-secondary" onclick="event.stopPropagation(); toggleConf('${confId}')">
+                <i class="bi bi-code-square me-1"></i> Configuration
+              </button>
+              <div id="${confId}" class="conf-block">
+                ${JSON.stringify(detail.conf, null, 2)}
+              </div>
+            </div>
+          `;
+        }
+
+        html += `</div>`;
+        container.innerHTML = html;
+
+      } catch (error) {
+        console.error('Error loading card content:', error);
+        container.innerHTML = `
+          <div class="p-3 border-top text-center text-danger">
+            <i class="bi bi-exclamation-triangle"></i>
+            Ошибка загрузки: ${error.message}
+          </div>
+        `;
+      }
+    }
+
+    // ================================================================
+    // ===== РЕНДЕРИНГ ВСЕХ АКТИВНЫХ DAG RUNS =====
+    // ================================================================
+    async function renderActiveDagsWithChild(dagRuns) {
+      const dagList = document.getElementById('dag-list');
+      dagList.innerHTML = '';
+
+      if (!dagRuns || dagRuns.length === 0) {
+        dagList.innerHTML = `
+          <div class="text-center py-4 text-muted">
+            <i class="bi bi-info-circle"></i>
+            Активных Dag Run's не найдено
+          </div>
+        `;
+        return;
+      }
+
+      dagRuns.forEach(dag => {
+        const card = renderSingleDagCard(dag);
+        dagList.appendChild(card);
+      });
+
+      updateStats(dagRuns);
+    }
+
+    // ================================================================
+    // ===== ЗАГРУЗКА АКТИВНЫХ С ПАГИНАЦИЕЙ =====
+    // ================================================================
+    async function loadActiveDagsWithPagination(reset = true) {
+      const loadingIndicator = document.getElementById('loadingIndicator');
+      const loadingMoreIndicator = document.getElementById('loadingMoreIndicator');
+
+      if (reset) {
+        activeOffset = 0;
+        activeHasMore = true;
+        loadingIndicator.style.display = 'block';
+      }
+
+      activeLoading = true;
+
+      try {
+        const endpoint = `${API_CONFIG.baseUrl}dags/${choosedDagId}/dagRuns?state=running&state=queued&limit=${activeLimit}&offset=${activeOffset}`;
+        const response = await fetchApi(endpoint);
+        const dagRuns = response.dag_runs || [];
+        const totalEntries = response.total_entries || 0;
+
+        activeOffset += dagRuns.length;
+        activeTotal = totalEntries;
+        activeHasMore = activeOffset < totalEntries;
+
+        if (reset) {
+          await renderActiveDagsWithChild(dagRuns);
+          loadingIndicator.style.display = 'none';
+        } else {
+          // Догружаем новые карточки
+          const dagList = document.getElementById('dag-list');
+          dagRuns.forEach(dag => {
+            const card = renderSingleDagCard(dag);
+            dagList.appendChild(card);
+          });
+        }
+
+        activeLoading = false;
+        loadingMoreIndicator.style.display = 'none';
+
+      } catch (error) {
+        console.error('Error loading active DAGs:', error);
+        activeLoading = false;
+        loadingMoreIndicator.style.display = 'none';
+
+        if (reset) {
+          loadingIndicator.style.display = 'none';
+          document.getElementById('dag-list').innerHTML = `
+            <div class="text-center py-4 text-danger">
+              <i class="bi bi-exclamation-triangle"></i>
+              Ошибка загрузки: ${error.message}
+              <br>
+              <button class="btn btn-sm btn-outline-primary mt-2" onclick="loadActiveDagsWithPagination(true)">
+                <i class="bi bi-arrow-clockwise"></i> Повторить
+              </button>
+            </div>
+          `;
+        }
+      }
+    }
+
+    // ================================================================
+    // ===== БЕСКОНЕЧНЫЙ СКРОЛЛ =====
+    // ================================================================
+    function setupInfiniteScroll() {
+      const observer = new IntersectionObserver((entries) => {
+        entries.forEach(entry => {
+          if (entry.isIntersecting && activeHasMore && !activeLoading) {
+            document.getElementById('loadingMoreIndicator').style.display = 'block';
+            loadActiveDagsWithPagination(false);
+          }
+        });
+      }, {
+        root: null,
+        rootMargin: '100px',
+        threshold: 0.1
+      });
+
+      const scrollTrigger = document.getElementById('scrollTrigger');
+      if (scrollTrigger) {
+        observer.observe(scrollTrigger);
+      }
+    }
+
+    // ================================================================
+    // ===== ОБНОВЛЕНИЕ СТАТИСТИКИ =====
+    // ================================================================
+    function updateStats(dagRuns) {
+      const counts = dagRuns.reduce((acc, run) => {
+        acc[run.state] = (acc[run.state] || 0) + 1;
+        return acc;
+      }, { running: 0, success: 0, failed: 0, queued: 0 });
+
+      document.getElementById('running-count').textContent = counts.running;
+      document.getElementById('success-count').textContent = counts.success;
+      document.getElementById('failed-count').textContent = counts.failed;
+      document.getElementById('queued-count').textContent = counts.queued;
+    }
+
+    // ================================================================
+    // ===== ФУНКЦИИ ДЛЯ TASK DETAILS И CONF =====
+    // ================================================================
+    function toggleTaskDetails(detailId) {
+      const el = document.getElementById(detailId);
+      if (!el) return;
+      el.style.display = el.style.display === 'none' ? 'block' : 'none';
+    }
+
+    function toggleConf(confId) {
+      const el = document.getElementById(confId);
+      if (!el) return;
+      el.classList.toggle('show');
+    }
+
+    // ================================================================
+    // ===== ОТМЕНА DAG RUN =====
+    // ================================================================
+    async function cancelDagRun(dagId, dagRunId, vendor, model) {
+      if (!confirm(`Вы уверены, что хотите отменить ${vendor} ${model}?`)) {
+        return;
+      }
+      try {
+        const option = {
+          method: 'DELETE',
+          headers: API_CONFIG.headers,
+        };
+
+        if (!accessToken) {
+          await getToken();
+        }
+
+        option.headers["Authorization"] = `Bearer ${accessToken}`;
+
+        const endpoint = `${API_CONFIG.baseUrl}dags/${dagId}/dagRuns/${dagRunId}`;
+        const response = await fetch(endpoint, option);
+
+        if (!response.ok) {
+          throw new Error(`Ошибка отмены: ${response.status}`);
+        }
+
+        alert(`DAG Run "${dagId}" отменён`);
+        loadActiveDagsWithPagination(true);
+      } catch (error) {
+        console.error('Ошибка отмены:', error);
+        alert(`Ошибка отмены: ${error.message}`);
+      }
+    }
+
+    // ================================================================
+    // ===== ЗАПУСК =====
+    // ================================================================
+    document.addEventListener('DOMContentLoaded', () => {
+      setupInfiniteScroll();
+      loadActiveDagsWithPagination(true);
+    });
+
+    // ================================================================
+    // ===== ГЛОБАЛЬНЫЕ ФУНКЦИИ =====
+    // ================================================================
+    window.toggleTaskDetails = toggleTaskDetails;
+    window.toggleConf = toggleConf;
+    window.cancelDagRun = cancelDagRun;
+    window.loadActiveDagsWithPagination = loadActiveDagsWithPagination;
+    window.renderActiveDagsWithChild = renderActiveDagsWithChild;
+  </script>
+</body>
+</html>
