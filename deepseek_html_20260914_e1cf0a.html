@@ -1,0 +1,787 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Completed Tasks Test</title>
+
+  <!-- Bootstrap CSS -->
+  <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+  <!-- Bootstrap Icons -->
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.10.0/font/bootstrap-icons.css">
+
+  <style>
+    body {
+      background: #f8f9fa;
+      padding: 2rem;
+      font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+    }
+
+    /* ===== Обертка таблицы ===== */
+    .completed-table-wrapper {
+      background: white;
+      border-radius: 0.75rem;
+      box-shadow: 0 4px 6px rgba(0, 0, 0, 0.05);
+      overflow: hidden;
+      margin: 1rem 0;
+    }
+
+    /* ===== Панель выбора ===== */
+    .selection-controls {
+      background: white;
+      padding: 1rem 1.5rem;
+      border-bottom: 1px solid #e9ecef;
+      display: none;
+      align-items: center;
+      justify-content: space-between;
+      gap: 1rem;
+    }
+    .selection-controls.show {
+      display: flex;
+    }
+    .selection-info {
+      display: flex;
+      align-items: center;
+      gap: 1rem;
+      flex: 1;
+    }
+    .selection-actions {
+      display: flex;
+      gap: 0.5rem;
+    }
+
+    /* ===== Таблица ===== */
+    .completed-table {
+      width: 100%;
+      border-collapse: collapse;
+      font-size: 0.9rem;
+    }
+
+    .completed-table thead th {
+      background: #f8f9fa;
+      color: #2c3e50;
+      font-weight: 600;
+      font-size: 0.8rem;
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+      padding: 0.9rem 1rem;
+      border-bottom: 2px solid #e9ecef;
+      text-align: left;
+      white-space: nowrap;
+    }
+
+    .completed-table tbody tr {
+      transition: all 0.15s ease;
+      border-bottom: 1px solid #f1f3f5;
+      cursor: pointer;
+    }
+    .completed-table tbody tr:hover {
+      background: rgba(67, 97, 238, 0.04);
+    }
+
+    /* Подсветка статуса */
+    .completed-table tbody tr.status-success {
+      border-left: 4px solid #198754;
+      background: rgba(25, 135, 84, 0.02);
+    }
+    .completed-table tbody tr.status-success:hover {
+      background: rgba(25, 135, 84, 0.06);
+    }
+    .completed-table tbody tr.status-failed {
+      border-left: 4px solid #dc3545;
+      background: rgba(220, 53, 69, 0.02);
+    }
+    .completed-table tbody tr.status-failed:hover {
+      background: rgba(220, 53, 69, 0.06);
+    }
+
+    /* ===== ВЫБРАННАЯ СТРОКА — яркая подсветка ===== */
+    .completed-table tbody tr.selected {
+      background: rgba(67, 97, 238, 0.12) !important;
+      box-shadow: inset 0 0 0 2px rgba(67, 97, 238, 0.3);
+    }
+    .completed-table tbody tr.selected td {
+      color: #2c3e50;
+    }
+    .completed-table tbody tr.selected:hover {
+      background: rgba(67, 97, 238, 0.18) !important;
+    }
+
+    .completed-table tbody td {
+      padding: 0.85rem 1rem;
+      vertical-align: middle;
+      color: #2c3e50;
+    }
+
+    /* ===== ЧЕКБОКС — заметнее ===== */
+    .completed-table .form-check-input {
+      cursor: pointer;
+      margin: 0;
+      width: 1.2em;
+      height: 1.2em;
+      border: 2px solid #adb5bd;
+      transition: all 0.15s ease;
+    }
+    .completed-table .form-check-input:checked {
+      background-color: #4361ee;
+      border-color: #4361ee;
+    }
+    .completed-table .form-check-input:focus {
+      box-shadow: 0 0 0 0.2rem rgba(67, 97, 238, 0.25);
+      border-color: #4361ee;
+    }
+
+    .file-name-cell {
+      font-weight: 500;
+      max-width: 250px;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+
+    .details-cell {
+      max-width: 300px;
+    }
+    .details-success {
+      color: #6c757d;
+    }
+    .details-failed {
+      color: #dc3545;
+      font-weight: 500;
+    }
+
+    .flags-cell {
+      display: flex;
+      gap: 0.5rem;
+      align-items: center;
+    }
+    .flag-icon {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      width: 30px;
+      height: 30px;
+      border-radius: 50%;
+      transition: all 0.2s ease;
+      font-size: 0.9rem;
+    }
+    .flag-icon.auto {
+      background: rgba(13, 110, 253, 0.1);
+      color: #0d6efd;
+    }
+    .flag-icon.manual {
+      background: rgba(108, 117, 125, 0.1);
+      color: #6c757d;
+    }
+    .flag-icon.other {
+      background: rgba(111, 66, 193, 0.1);
+      color: #6f42c1;
+      cursor: pointer;
+    }
+    .flag-icon.other:hover {
+      background: rgba(111, 66, 193, 0.2);
+      transform: scale(1.1);
+    }
+
+    .time-cell {
+      white-space: nowrap;
+      color: #6c757d;
+      font-size: 0.85rem;
+    }
+
+    .empty-value {
+      color: #adb5bd;
+    }
+
+    /* ===== Модалка JSON ===== */
+    .json-wrapper {
+      background: #1e1e1e;
+      border-radius: 0.5rem;
+      padding: 1rem;
+      max-height: 500px;
+      overflow-y: auto;
+    }
+    .json-content {
+      color: #d4d4d4;
+      margin: 0;
+      font-size: 0.85rem;
+      font-family: 'Courier New', monospace;
+      white-space: pre-wrap;
+      word-break: break-word;
+    }
+
+    /* ===== Tooltip для ошибок ===== */
+    .error-tooltip {
+      position: fixed;
+      z-index: 9999;
+      background: #1e1e1e;
+      color: #f8f8f8;
+      padding: 0.75rem 1rem;
+      border-radius: 0.5rem;
+      box-shadow: 0 10px 25px rgba(0, 0, 0, 0.2);
+      font-size: 0.8rem;
+      max-width: 500px;
+      pointer-events: none;
+      display: none;
+    }
+    .error-tooltip.show {
+      display: block;
+    }
+    .error-tooltip .tooltip-row {
+      margin-bottom: 0.5rem;
+    }
+    .error-tooltip .tooltip-row:last-child {
+      margin-bottom: 0;
+    }
+    .error-tooltip .tooltip-label {
+      color: #9cdcfe;
+      font-weight: 600;
+      font-size: 0.75rem;
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+      margin-bottom: 0.15rem;
+    }
+    .error-tooltip .tooltip-value {
+      color: #ce9178;
+      font-family: 'Courier New', monospace;
+      white-space: pre-wrap;
+      word-break: break-word;
+    }
+    .error-tooltip .tooltip-value.traceback {
+      color: #d4d4d4;
+      font-size: 0.75rem;
+      max-height: 200px;
+      overflow-y: auto;
+      background: #2d2d2d;
+      padding: 0.5rem;
+      border-radius: 0.25rem;
+      margin-top: 0.25rem;
+    }
+
+    @media (max-width: 768px) {
+      .completed-table {
+        font-size: 0.8rem;
+      }
+      .completed-table thead th,
+      .completed-table tbody td {
+        padding: 0.6rem 0.5rem;
+      }
+      .file-name-cell,
+      .details-cell {
+        max-width: 120px;
+      }
+    }
+  </style>
+</head>
+<body>
+
+  <div class="container">
+    <h2 class="mb-4">Завершенные задачи</h2>
+
+    <!-- ===== ТАБЛИЦА ===== -->
+    <div class="completed-table-wrapper">
+      <div class="selection-controls" id="selectionControls">
+        <div class="selection-info">
+          <div>
+            <input type="checkbox" class="form-check-input select-all-checkbox" id="selectAllCheckbox">
+            <label class="form-check-label fw-medium" for="selectAllCheckbox">
+              Выбрать все
+            </label>
+          </div>
+          <span class="text-muted" id="selectedCount">0 объектов выбрано</span>
+        </div>
+        <div class="selection-actions">
+          <button class="btn btn-sm btn-outline-danger" id="deleteSelectedBtn">
+            <i class="bi bi-trash"></i> Удалить выбранные
+          </button>
+          <button class="btn btn-sm btn-outline-secondary" id="clearSelectionBtn">
+            <i class="bi bi-x-circle"></i> Очистить
+          </button>
+        </div>
+      </div>
+
+      <div class="table-responsive">
+        <table class="completed-table">
+          <thead>
+            <tr>
+              <th style="width: 50px;">
+                <input type="checkbox" class="form-check-input" id="selectAllHeader">
+              </th>
+              <th>Производитель</th>
+              <th>Модель</th>
+              <th>Версия</th>
+              <th>Имя файла</th>
+              <th>Детали</th>
+              <th style="width: 100px;">Флаги</th>
+              <th>Время</th>
+            </tr>
+          </thead>
+          <tbody id="completed-tbody"></tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+
+  <!-- ===== МОДАЛКА OTHER ===== -->
+  <div class="modal fade" id="otherModal" tabindex="-1">
+    <div class="modal-dialog modal-lg modal-dialog-scrollable">
+      <div class="modal-content">
+        <div class="modal-header">
+          <h5 class="modal-title">
+            <i class="bi bi-code-square me-2"></i>Дополнительная информация
+          </h5>
+          <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+        </div>
+        <div class="modal-body">
+          <div class="json-wrapper">
+            <pre id="otherJsonContent" class="json-content"></pre>
+          </div>
+        </div>
+        <div class="modal-footer">
+          <button type="button" class="btn btn-outline-secondary" id="copyJsonBtn">
+            <i class="bi bi-clipboard me-1"></i>Копировать JSON
+          </button>
+          <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Закрыть</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Bootstrap JS -->
+  <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
+
+  <script>
+    // ================================================================
+    // ===== ЗАХАРДКОЖЕННЫЕ ДАННЫЕ =====
+    // ================================================================
+    const MOCK_COMPLETED_DATA = {
+      total_count: 6,
+      es_response: [
+        // 1. Success, есть ext_name, без other, авто
+        {
+          _source: {
+            vendor: "Intel",
+            model: "Xeon E5-2680",
+            version: "2.1.0",
+            file_hash: "abc123def456",
+            file_name: "firmware_intel_xeon_v2.1.0.bin",
+            status: true,
+            ext_name: "success_handler_v1",
+            is_auto_uploaded: true,
+            timestamp: "2026-09-14T10:30:00Z"
+          }
+        },
+        // 2. Success, есть ext_name, есть other, вручную
+        {
+          _source: {
+            vendor: "AMD",
+            model: "Ryzen 9 5950X",
+            version: "3.0.1",
+            file_hash: "def789ghi012",
+            file_name: "firmware_amd_ryzen_v3.0.1.bin",
+            status: true,
+            ext_name: "advanced_parser",
+            is_auto_uploaded: false,
+            other: JSON.stringify({
+              parser_version: "2.3.1",
+              extracted_files: 1547,
+              warnings: ["Unknown section at offset 0x1A2B", "CRC mismatch corrected"],
+              metadata: {
+                build_date: "2026-09-10",
+                compiler: "GCC 11.2",
+                architecture: "x86_64"
+              }
+            }, null, 2),
+            timestamp: "2026-09-14T09:15:00Z"
+          }
+        },
+        // 3. Failed, есть все поля ошибки, авто
+        {
+          _source: {
+            vendor: "NVIDIA",
+            model: "RTX 4090",
+            version: "1.5.2",
+            file_hash: "ghi345jkl678",
+            file_name: "firmware_nvidia_rtx4090_v1.5.2.bin",
+            status: false,
+            exc_line: 142,
+            exc_type: "ValueError",
+            exc_value: "Invalid firmware signature at offset 0x4F2A",
+            exc_traceback: "Traceback (most recent call last):\n  File \"/app/parsers/firmware.py\", line 142, in parse_firmware\n    signature = self.extract_signature(data)\nValueError: Invalid firmware signature at offset 0x4F2A",
+            is_auto_uploaded: true,
+            timestamp: "2026-09-14T08:45:00Z"
+          }
+        },
+        // 4. Failed, только status=false (без полей ошибок)
+        {
+          _source: {
+            vendor: "Qualcomm",
+            model: "Snapdragon 8 Gen 2",
+            version: "4.2.0",
+            file_hash: "jkl901mno234",
+            file_name: "firmware_qualcomm_sd8g2_v4.2.0.bin",
+            status: false,
+            is_auto_uploaded: false,
+            timestamp: "2026-09-14T07:20:00Z"
+          }
+        },
+        // 5. Success, есть ext_name, есть other, вручную
+        {
+          _source: {
+            vendor: "Samsung",
+            model: "Exynos 2200",
+            version: "2.8.5",
+            file_hash: "mno567pqr890",
+            file_name: "firmware_samsung_exynos_v2.8.5.bin",
+            status: true,
+            ext_name: "samsung_parser",
+            is_auto_uploaded: false,
+            other: JSON.stringify({
+              detected_components: ["bootloader", "kernel", "rootfs"],
+              checksum_verified: true
+            }, null, 2),
+            timestamp: "2026-09-13T22:10:00Z"
+          }
+        },
+        // 6. Failed, есть ошибка, авто
+        {
+          _source: {
+            vendor: "Apple",
+            model: "M2 Pro",
+            version: "1.1.0",
+            file_hash: "pqr123stu456",
+            file_name: "firmware_apple_m2pro_v1.1.0.bin",
+            status: false,
+            exc_line: 87,
+            exc_type: "FileNotFoundError",
+            exc_value: "Required section 'SEP' not found in firmware",
+            exc_traceback: "Traceback (most recent call last):\n  File \"/app/parsers/apple.py\", line 87\nFileNotFoundError: Required section 'SEP'",
+            is_auto_uploaded: true,
+            other: JSON.stringify({
+              partial_extraction: true,
+              sections_found: ["IBOOT", "KERNEL", "ROOTFS"]
+            }, null, 2),
+            timestamp: "2026-09-13T20:05:00Z"
+          }
+        }
+      ]
+    };
+
+    // ================================================================
+    // ===== СОСТОЯНИЕ =====
+    // ================================================================
+    let selectedDags = new Set();
+    let firstCardSelected = false;
+    let currentOtherJson = null;
+
+    // ================================================================
+    // ===== ВСПОМОГАТЕЛЬНЫЕ =====
+    // ================================================================
+    function formatDateTime(dateString) {
+      if (!dateString) return 'N/A';
+      const date = new Date(dateString);
+      return date.toLocaleString('ru-RU');
+    }
+
+    function escapeHtml(str) {
+      if (str === null || str === undefined) return '';
+      return String(str)
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;')
+        .replace(/'/g, '&#39;');
+    }
+
+    // ================================================================
+    // ===== РЕНДЕРИНГ =====
+    // ================================================================
+    function renderCompletedTasks(data, reload = false) {
+      const tbody = document.getElementById('completed-tbody');
+
+      if (reload) {
+        tbody.innerHTML = '';
+        selectedDags.clear();
+        toggleSelectionMode();
+      }
+
+      if (data.total_count === 0) {
+        tbody.innerHTML = `
+          <tr>
+            <td colspan="8" class="text-center py-5 text-muted">
+              <i class="bi bi-info-circle fs-3 d-block mb-2"></i>
+              Завершенных задач не найдено
+            </td>
+          </tr>
+        `;
+        return;
+      }
+
+      const dags = data.es_response || [];
+      dags.forEach(({ _source }) => {
+        const row = createCompletedRow(_source);
+        tbody.appendChild(row);
+      });
+    }
+
+    function createCompletedRow(source) {
+      const {
+        vendor, model, version, file_hash, file_name, status,
+        ext_name, exc_line, exc_type, exc_value, exc_traceback,
+        is_auto_uploaded, other, timestamp
+      } = source;
+
+      const tr = document.createElement('tr');
+      tr.className = status ? 'status-success' : 'status-failed';
+      tr.dataset.dagId = file_hash;
+
+      if (selectedDags.has(file_hash)) tr.classList.add('selected');
+
+      // Details
+      let detailsHtml = '';
+      if (status === true && ext_name) {
+        detailsHtml = `<span class="details-success">${escapeHtml(ext_name)}</span>`;
+      } else if (status === false && exc_type) {
+        detailsHtml = `
+          <span class="details-failed error-trigger" 
+                data-exc-line="${escapeHtml(exc_line || '')}"
+                data-exc-type="${escapeHtml(exc_type || '')}"
+                data-exc-value="${escapeHtml(exc_value || '')}"
+                data-exc-traceback="${escapeHtml(exc_traceback || '')}">
+            <i class="bi bi-exclamation-triangle-fill me-1"></i>${escapeHtml(exc_type)}
+          </span>
+        `;
+      } else if (status === false) {
+        detailsHtml = `<span class="details-failed"><i class="bi bi-question-circle me-1"></i>Ошибка без деталей</span>`;
+      } else {
+        detailsHtml = `<span class="empty-value">—</span>`;
+      }
+
+      // Flags
+      let flagsHtml = '';
+      if (is_auto_uploaded === true) {
+        flagsHtml += `<span class="flag-icon auto" title="Автоматически"><i class="bi bi-robot"></i></span>`;
+      } else if (is_auto_uploaded === false) {
+        flagsHtml += `<span class="flag-icon manual" title="Вручную"><i class="bi bi-hand-index"></i></span>`;
+      }
+      if (other) {
+        flagsHtml += `<span class="flag-icon other" title="Дополнительно" onclick="event.stopPropagation(); openOtherModal('${file_hash}')"><i class="bi bi-file-earmark-code"></i></span>`;
+      }
+
+      tr.innerHTML = `
+        <td><input type="checkbox" class="form-check-input row-checkbox" ${selectedDags.has(file_hash) ? 'checked' : ''}></td>
+        <td>${escapeHtml(vendor || '—')}</td>
+        <td>${escapeHtml(model || '—')}</td>
+        <td>${escapeHtml(version || '—')}</td>
+        <td><div class="file-name-cell" title="${escapeHtml(file_name || '')}">${escapeHtml(file_name || '—')}</div></td>
+        <td class="details-cell">${detailsHtml}</td>
+        <td><div class="flags-cell">${flagsHtml || '<span class="empty-value">—</span>'}</div></td>
+        <td><span class="time-cell">${formatDateTime(timestamp)}</span></td>
+      `;
+
+      tr._sourceData = source;
+      return tr;
+    }
+
+    // ================================================================
+    // ===== ВЫБОР =====
+    // ================================================================
+    function initCompletedTableListeners() {
+      const tbody = document.getElementById('completed-tbody');
+
+      tbody.addEventListener('click', (e) => {
+        const tr = e.target.closest('tr');
+        if (!tr || !tr._sourceData) return;
+
+        const fileHash = tr._sourceData.file_hash;
+
+        // ===== Клик на чекбоксе — управляем выбором =====
+        if (e.target.classList.contains('row-checkbox')) {
+          e.stopPropagation();
+          const isChecked = e.target.checked;
+          if (isChecked) {
+            selectedDags.add(fileHash);
+          } else {
+            selectedDags.delete(fileHash);
+          }
+          toggleSelectionMode();
+          updateRowSelection(fileHash);
+          return;
+        }
+
+        // ===== Клик на иконке other =====
+        if (e.target.closest('.flag-icon.other')) {
+          e.stopPropagation();
+          return;
+        }
+
+        // ===== Клик на остальной части строки — переход =====
+        console.log('Переход на /tasks/' + fileHash);
+        // window.location.href = `/tasks/${fileHash}`;
+      });
+
+      document.getElementById('selectAllHeader').addEventListener('change', (e) => {
+        if (e.target.checked) selectAllDags(); else clearSelection();
+      });
+    }
+
+    function selectAllDags() {
+      document.querySelectorAll('#completed-tbody tr[data-dag-id]').forEach(row => {
+        selectedDags.add(row.dataset.dagId);
+        updateRowSelection(row.dataset.dagId);
+      });
+      toggleSelectionMode();
+    }
+
+    function clearSelection() {
+      selectedDags.clear();
+      document.querySelectorAll('#completed-tbody tr[data-dag-id]').forEach(row => {
+        row.classList.remove('selected');
+        const cb = row.querySelector('.row-checkbox');
+        if (cb) cb.checked = false;
+      });
+      document.getElementById('selectAllHeader').checked = false;
+      toggleSelectionMode();
+    }
+
+    function updateRowSelection(dagId) {
+      const row = document.querySelector(`#completed-tbody tr[data-dag-id="${dagId}"]`);
+      if (row) {
+        const isSel = selectedDags.has(dagId);
+        row.classList.toggle('selected', isSel);
+        const cb = row.querySelector('.row-checkbox');
+        if (cb) cb.checked = isSel;
+      }
+    }
+
+    function toggleSelectionMode() {
+      const isSel = selectedDags.size > 0;
+      document.getElementById('selectionControls').classList.toggle('show', isSel);
+      updateSelectedCount();
+    }
+
+    function updateSelectedCount() {
+      const count = selectedDags.size;
+      document.getElementById('selectedCount').textContent = `${count} объектов выбрано`;
+      const allRows = document.querySelectorAll('#completed-tbody tr[data-dag-id]');
+      const allChecked = count > 0 && count === allRows.length;
+      document.getElementById('selectAllHeader').checked = allChecked;
+      document.getElementById('selectAllCheckbox').checked = allChecked;
+    }
+
+    // ================================================================
+    // ===== МОДАЛКА OTHER =====
+    // ================================================================
+    function openOtherModal(fileHash) {
+      const row = document.querySelector(`#completed-tbody tr[data-dag-id="${fileHash}"]`);
+      if (!row || !row._sourceData || !row._sourceData.other) return;
+
+      let formatted;
+      try {
+        const parsed = typeof row._sourceData.other === 'string' ? JSON.parse(row._sourceData.other) : row._sourceData.other;
+        formatted = JSON.stringify(parsed, null, 2);
+      } catch {
+        formatted = row._sourceData.other;
+      }
+
+      currentOtherJson = formatted;
+      document.getElementById('otherJsonContent').textContent = formatted;
+
+      new bootstrap.Modal(document.getElementById('otherModal')).show();
+    }
+
+    function copyOtherJson() {
+      if (!currentOtherJson) return;
+      navigator.clipboard.writeText(currentOtherJson).then(() => {
+        const btn = document.getElementById('copyJsonBtn');
+        const orig = btn.innerHTML;
+        btn.innerHTML = '<i class="bi bi-check me-1"></i>Скопировано!';
+        btn.classList.add('btn-success');
+        setTimeout(() => {
+          btn.innerHTML = orig;
+          btn.classList.remove('btn-success');
+        }, 1500);
+      });
+    }
+
+    // ================================================================
+    // ===== TOOLTIP =====
+    // ================================================================
+    function initErrorTooltip() {
+      let tooltipEl = document.getElementById('errorTooltip');
+      if (!tooltipEl) {
+        tooltipEl = document.createElement('div');
+        tooltipEl.id = 'errorTooltip';
+        tooltipEl.className = 'error-tooltip';
+        document.body.appendChild(tooltipEl);
+      }
+
+      document.addEventListener('mouseover', (e) => {
+        const trigger = e.target.closest('.error-trigger');
+        if (!trigger) return;
+
+        const excType = trigger.dataset.excType;
+        const excLine = trigger.dataset.excLine;
+        const excValue = trigger.dataset.excValue;
+        const excTraceback = trigger.dataset.excTraceback;
+
+        let html = '';
+        if (excType) html += `<div class="tooltip-row"><div class="tooltip-label">Type</div><div class="tooltip-value">${escapeHtml(excType)}</div></div>`;
+        if (excLine) html += `<div class="tooltip-row"><div class="tooltip-label">Line</div><div class="tooltip-value">${escapeHtml(excLine)}</div></div>`;
+        if (excValue) html += `<div class="tooltip-row"><div class="tooltip-label">Value</div><div class="tooltip-value">${escapeHtml(excValue)}</div></div>`;
+        if (excTraceback) html += `<div class="tooltip-row"><div class="tooltip-label">Traceback</div><div class="tooltip-value traceback">${escapeHtml(excTraceback)}</div></div>`;
+
+        tooltipEl.innerHTML = html;
+        tooltipEl.classList.add('show');
+
+        const rect = trigger.getBoundingClientRect();
+        tooltipEl.style.left = Math.min(rect.left, window.innerWidth - 520) + 'px';
+        tooltipEl.style.top = (rect.bottom + 8) + 'px';
+
+        const tRect = tooltipEl.getBoundingClientRect();
+        if (tRect.bottom > window.innerHeight) {
+          tooltipEl.style.top = (rect.top - tRect.height - 8) + 'px';
+        }
+      });
+
+      document.addEventListener('mouseout', (e) => {
+        if (e.target.closest('.error-trigger')) {
+          tooltipEl.classList.remove('show');
+        }
+      });
+
+      window.addEventListener('scroll', () => tooltipEl.classList.remove('show'), true);
+    }
+
+    // ================================================================
+    // ===== ИНИЦИАЛИЗАЦИЯ =====
+    // ================================================================
+    document.addEventListener('DOMContentLoaded', () => {
+      initCompletedTableListeners();
+      initErrorTooltip();
+
+      document.getElementById('selectAllCheckbox').addEventListener('change', (e) => {
+        if (e.target.checked) selectAllDags(); else clearSelection();
+      });
+
+      document.getElementById('deleteSelectedBtn').addEventListener('click', () => {
+        if (selectedDags.size === 0) return;
+        if (confirm(`Удалить ${selectedDags.size} объектов?`)) {
+          alert(`Удаление ${selectedDags.size} объектов (мок)`);
+          clearSelection();
+        }
+      });
+
+      document.getElementById('clearSelectionBtn').addEventListener('click', clearSelection);
+
+      document.getElementById('copyJsonBtn').addEventListener('click', copyOtherJson);
+
+      // Рендер данных
+      renderCompletedTasks(MOCK_COMPLETED_DATA, true);
+    });
+
+    // Экспорт
+    window.openOtherModal = openOtherModal;
+  </script>
+</body>
+</html>
