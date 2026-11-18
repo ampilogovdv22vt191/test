@@ -1,0 +1,35 @@
+# Подключается вторым файлом к существующему Compose.
+x-batch-settings: &batch-settings
+  image: ${FILE_SERVICE_IMAGE:-file-service:local}
+  env_file:
+    - .env
+  volumes:
+    - batch_spool:/batch-work
+
+services:
+  # Замени file_service на точное имя веб-сервиса из своего Compose.
+  file_service:
+    <<: *batch-settings
+    depends_on:
+      batch_init:
+        condition: service_completed_successfully
+
+  # Одноразовый запуск. Создаёт недостающие таблицы в настроенном PostgreSQL.
+  batch_init:
+    <<: *batch-settings
+    entrypoint: ["python", "-m", "batch_upload"]
+    command: ["init-db"]
+    restart: "no"
+
+  batch_worker:
+    <<: *batch-settings
+    entrypoint: ["python", "-m", "batch_upload"]
+    command: ["worker"]
+    restart: unless-stopped
+    stop_grace_period: 30s
+    depends_on:
+      batch_init:
+        condition: service_completed_successfully
+
+volumes:
+  batch_spool:
