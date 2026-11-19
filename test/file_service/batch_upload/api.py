@@ -19,11 +19,60 @@ api = Blueprint("batch_upload", __name__)
 log = logging.getLogger(__name__)
 
 
+def configure_request_limits(app) -> None:
+    """Устанавливает отдельные лимиты для POST /upload/batch во Flask 2.2.
+
+    Наследует текущий класс запроса приложения. Для маршрута пакетной
+    загрузки задаёт предел тела запроса и настройки разбора multipart.
+    Остальные маршруты используют лимиты исходного класса запроса.
+    """
+
+    upload_endpoint = f"{api.name}.upload_batch"
+
+    class BatchRequest(app.request_class):
+        @property
+        def max_content_length(self):
+            """Возвращает предел всего HTTP-тела в байтах для текущего маршрута."""
+
+            if self.endpoint == upload_endpoint:
+                # Запас для заголовков формы. Лимит самого ZIP проверяет upload_batch.
+                return app.config["BATCH_MAX_ARCHIVE_BYTES"] + 256 * 1024
+            return super().max_content_length
+
+        def make_form_data_parser(self):
+            """Создаёт парсер формы и ограничивает число и размер её частей.
+
+            Для загрузки ZIP допускает до четырёх частей multipart.
+            Буфер парсера ограничен 500 000 байтами.
+            """
+
+            parser = super().make_form_data_parser()
+            if self.endpoint == upload_endpoint:
+                parser.max_form_parts = 4
+                parser.max_form_memory_size = 500_000
+            return parser
+
+    app.request_class = BatchRequest
+
+
 def _components():
+    """Берёт объект Batch из текущего Flask-приложения.
+
+    В Batch находятся фабрика сессий PostgreSQL, каталог временных ZIP
+    и адаптеры хранилища. Объект создаёт init_batch() при настройке Flask.
+    """
+
     return current_app.extensions["batch_upload"]
 
 
 def _job_json(job: Job) -> dict:
+    """Преобразует запись Job из PostgreSQL в сводку для фронтенда.
+
+    UUID становится строкой, а даты — строками ISO 8601. Сводка содержит
+    статус архива, его общую ошибку и счётчики. total равен None до проверки
+    архива, а finished_at — до завершения. Список файлов добавляет job_detail().
+    """
+
     return {
         "job_id": str(job.id),
         "archive_name": job.archive_name,
@@ -41,6 +90,18 @@ def _job_json(job: Job) -> dict:
 
 
 def _file_json(item: JobFile) -> dict:
+    """Преобразует одну строку JobFile в словарь для ответа с деталями задачи.
+
+    file_id — UUID строки в PostgreSQL, filename — имя файла без каталога,
+    archive_path — путь внутри ZIP и ключ объекта в хранилище. Если файл
+    не найден при сопоставлении, путь и размер могут отсутствовать.
+    size хранит размер файла из ZIP в байтах, meta — его запись из data.json.
+
+    status показывает результат обработки, reason содержит причину ошибки
+    или отмены. Для статусов uploaded и exists добавляется download_url
+    на маршрут скачивания. Для остальных статусов ссылка равна None.
+    """
+
     return {
         "file_id": str(item.id),
         "filename": item.filename,
@@ -58,24 +119,35 @@ def _file_json(item: JobFile) -> dict:
 @api.errorhandler(BadRequest)
 @api.errorhandler(RequestEntityTooLarge)
 def invalid_request(error):
+    """Преобразует ошибку входного запроса в JSON с исходным HTTP-статусом.
+
+    BadRequest даёт 400, а превышение лимита тела или формы даёт 413.
+    Текст из исключения передаётся фронтенду в поле error.
+    """
+
     return jsonify(error=error.description), error.code
 
 
 @api.errorhandler(SQLAlchemyError)
 def db_error(error):
+    """Записывает подробности ошибки SQLAlchemy в журнал и возвращает JSON с 503."""
+
     log.error("Ошибка базы данных пакетных загрузок", exc_info=error)
     return jsonify(error="База данных загрузок временно недоступна"), 503
 
 
 @api.post("/upload/batch")
 def upload_batch():
-    """Сохраняет ZIP, создаёт задачу в очереди и возвращает её идентификатор."""
+    """Принимает один архив из поля archive в форме multipart.
+
+    Порциями записывает его в каталог BATCH_WORK_DIR/<job_id> и проверяет
+    размер самого ZIP. После записи создаёт задачу queued и увеличивает
+    ревизию SSE в одной транзакции. Возвращает 202 и ссылку на детали
+    в заголовке Location. Содержимое архива затем проверяет воркер.
+    """
 
     components = _components()
     limit = current_app.config["BATCH_MAX_ARCHIVE_BYTES"]
-    # Даём запас на заголовки multipart. Размер самого ZIP проверяем отдельно.
-    request.max_content_length = limit + 256 * 1024
-    request.max_form_parts = 4
     submitted = request.files.getlist("archive")
     if len(submitted) != 1 or not submitted[0].filename:
         raise BadRequest("Передайте один ZIP в поле archive")
@@ -114,7 +186,12 @@ def upload_batch():
 
 @api.get("/upload/batch")
 def list_jobs():
-    """Возвращает активные загрузки и завершённые в заданном окне истории."""
+    """Возвращает сводки для списка загрузок на фронтенде.
+
+    Принимает hours от 1 до 168, по умолчанию использует BATCH_HISTORY_HOURS.
+    Активные задачи попадают в список независимо от возраста. Завершённые
+    отбираются по finished_at. Результат отсортирован от новых к старым.
+    """
 
     hours = request.args.get("hours", default=str(current_app.config["BATCH_HISTORY_HOURS"]))
     try:
@@ -134,7 +211,12 @@ def list_jobs():
 
 @api.get("/upload/batch/<uuid:job_id>")
 def job_detail(job_id):
-    """Читает статус задачи и список её файлов одним запросом к БД."""
+    """Возвращает состояние одной загрузки по UUID из URL.
+
+    Запрашивает задачу и её файлы вместе. Собирает сводку через _job_json(),
+    а массив files — через _file_json(). Для отсутствующей или удалённой
+    задачи возвращает 404.
+    """
 
     with _components().db.session() as session:
         job = session.execute(
@@ -147,7 +229,14 @@ def job_detail(job_id):
 
 @api.post("/upload/batch/<uuid:job_id>/cancel")
 def cancel_job(job_id):
-    """Отменяет задачу в очереди или сообщает воркеру, что пора остановиться."""
+    """Запрашивает отмену задачи по UUID и блокирует её строку в БД.
+
+    Для queued сразу фиксирует cancelled, удаляет временный ZIP после
+    завершения транзакции и возвращает 200. Для активной задачи ставит
+    cancelling и возвращает 202. Воркер завершит текущий файл и остановится.
+    Для отсутствующей задачи ответ 404. При повторной отмене уже отменённой
+    задачи ответ 200, для остальных итоговых статусов — 409.
+    """
 
     components = _components()
     with components.db.session.begin() as session:
@@ -172,12 +261,25 @@ def cancel_job(job_id):
 
 @api.get("/upload/events")
 def upload_events():
-    """Сообщает открытой модалке, когда ей нужно перечитать данные."""
+    """Открывает поток SSE для модалки со списком загрузок.
+
+    Возвращает text/event-stream. Событие sync сообщает, что фронтенду
+    пора заново запросить список загрузок и детали выбранной задачи.
+    URL и данные для этих запросов определяет фронтенд.
+    """
 
     db = _components().db
     interval = current_app.config["BATCH_SSE_INTERVAL"]
 
     def stream():
+        """Читает ревизию из БД и выдаёт SSE-сообщения по одному.
+
+        На первом чтении и при изменении ревизии отправляет sync.
+        Каждые 15 секунд отправляет heartbeat. Сессия БД закрывается
+        между чтениями. При ошибке БД браузер сможет переподключиться
+        и получить свежую ревизию.
+        """
+
         previous = None
         heartbeat_at = time.monotonic() + 15
         while True:
@@ -208,7 +310,12 @@ def upload_events():
 
 @api.get("/upload/files/<uuid:file_id>")
 def download_file(file_id):
-    """Находит ключ и адаптер по идентификатору файла и отдаёт его потоком."""
+    """Отдаёт сохранённый файл как вложение по UUID его строки JobFile.
+
+    По записи из БД выбирает адаптер хранилища, относительный ключ и имя
+    для скачивания. Отсутствующая запись или файл дают 404, ошибка связи
+    с хранилищем даёт 503. Поток передаётся Flask для отправки клиенту.
+    """
 
     components = _components()
     with components.db.session() as session:

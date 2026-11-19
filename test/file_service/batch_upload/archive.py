@@ -25,7 +25,11 @@ class Entry:
 
 
 def _safe_parts(name: str) -> list[str]:
-    """Проверяет, что путь можно сохранить в PostgreSQL и использовать как ключ."""
+    """Разбивает допустимое имя внутри ZIP на компоненты относительного пути.
+
+    Проверяет представимость имени в UTF-8 и применяет правила ключей
+    из storage.py. Некорректное имя превращает в ArchiveError для всей задачи.
+    """
 
     try:
         name.encode("utf-8")
@@ -35,6 +39,14 @@ def _safe_parts(name: str) -> list[str]:
 
 
 def _manifest(zip_file: ZipFile, info: ZipInfo, limit: int) -> list[dict]:
+    """Читает ограниченный по размеру data.json из уже открытого ZIP.
+
+    info указывает на запись в ZIP, limit задаёт максимальный размер в
+    байтах. Проверяет UTF-8 и JSON, затем требует массив словарей со
+    строковым filename без каталога. Возвращает записи для сопоставления
+    с файлами. Ошибка формата даёт ArchiveError.
+    """
+
     if info.file_size > limit:
         raise ArchiveError("data.json превышает допустимый размер")
     try:
@@ -59,6 +71,8 @@ def _manifest(zip_file: ZipFile, info: ZipInfo, limit: int) -> list[dict]:
             raise ArchiveError("Каждой записи data.json требуется строковое поле filename")
         if len(_safe_parts(item["filename"])) != 1:
             raise ArchiveError("В filename указывается имя файла без пути")
+        # Нормализацию дополнительных полей добавляй здесь, например очистку строк.
+        # Дальше этот словарь используется для сопоставления и сохраняется как meta.
     return result
 
 
@@ -69,7 +83,14 @@ def inspect_zip(
     max_unpacked: int,
     max_manifest: int,
 ) -> list[Entry]:
-    """Проверяет архив и сопоставляет метаданные с файлами без полной распаковки."""
+    """Проверяет структуру ZIP и готовит список Entry для воркера.
+
+    Ограничивает число записей и общий размер, проверяет пути и находит
+    data.json в корне архива. Сопоставляет filename с именем файла без
+    каталога. При единственном совпадении сохраняет полный путь в ZIP.
+    Дубликаты имён, отсутствующие файлы или метаданные записывает как
+    ошибки отдельных Entry. Ошибки структуры завершают весь архив.
+    """
 
     members = zip_file.infolist()
     if len(members) > max_members:

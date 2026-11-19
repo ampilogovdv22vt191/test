@@ -6,9 +6,10 @@ from pathlib import Path
 from flask import Flask
 from sqlalchemy.engine import URL, make_url
 
-from .api import api
+from .api import api, configure_request_limits
 from .db import Database
 from .storage import MountedStorage, Storage
+from .worker import Worker
 
 
 DEFAULTS = {
@@ -37,7 +38,12 @@ class Batch:
 
 
 def _database_url(app: Flask) -> URL:
-    """Берёт явный адрес БД или собирает его из переменных PostgreSQL."""
+    """Возвращает адрес подключения SQLAlchemy к PostgreSQL.
+
+    Сначала берёт BATCH_DATABASE_URL из Flask или окружения. Для адреса
+    postgresql:// явно выбирает драйвер psycopg. Если полного адреса
+    нет, собирает его из отдельных переменных POSTGRES_*.
+    """
 
     configured = app.config.get("BATCH_DATABASE_URL") or os.environ.get("BATCH_DATABASE_URL")
     if configured:
@@ -54,7 +60,12 @@ def _database_url(app: Flask) -> URL:
 
 
 def _configured_storage(app: Flask) -> dict[str, Storage]:
-    """Выбирает встроенный адаптер по конфигурации приложения."""
+    """Возвращает зарегистрированный встроенный адаптер хранилища.
+
+    При BATCH_STORAGE_BACKEND=smb читает адрес шары, имя пользователя
+    и пароль для прямого SMB-подключения. Для адаптера samba использует
+    папку BATCH_STORAGE_DIR, которая может быть примонтированной шарой.
+    """
 
     if app.config["BATCH_STORAGE_BACKEND"] == "smb":
         from .smb import SmbStorage
@@ -71,7 +82,13 @@ def _configured_storage(app: Flask) -> dict[str, Storage]:
 
 
 def init_batch(app: Flask, *, storages: Mapping[str, Storage] | None = None) -> Batch:
-    """Подключает пакетную загрузку к существующему приложению Flask."""
+    """Подключает маршруты пакетной загрузки к переданному экземпляру Flask.
+
+    Загружает и проверяет настройки, создаёт каталог временных ZIP,
+    выбирает адаптеры и сохраняет объект Batch в app.extensions.
+    Переданная карта storages позволяет подключить свои адаптеры.
+    Здесь же регистрируются отдельные лимиты запроса и Blueprint.
+    """
 
     # Настройки существующего приложения имеют приоритет над окружением.
     for key, default in DEFAULTS.items():
@@ -94,13 +111,20 @@ def init_batch(app: Flask, *, storages: Mapping[str, Storage] | None = None) -> 
         raise ValueError(f"Batch storage backend {default_backend!r} is not configured")
     batch = Batch(Database(_database_url(app)), spool, backends, default_backend)
     app.extensions["batch_upload"] = batch
+    configure_request_limits(app)
     app.register_blueprint(api)
     return batch
 
 
-def create_app() -> Flask:
-    """Создаёт отдельное Flask-приложение для запуска из Docker Compose."""
+def start_worker(app: Flask) -> Worker:
+    """Запускает фоновый обработчик для приложения, настроенного через init_batch().
 
-    app = Flask(__name__)
-    init_batch(app)
-    return app
+    Берёт общие зависимости из app.extensions, передаёт их Worker и
+    вызывает start(), который готовит таблицы и запускает поток.
+    Возвращает Worker, чтобы веб-сервис мог остановить его при завершении.
+    """
+
+    batch: Batch = app.extensions["batch_upload"]
+    worker = Worker(batch.db, batch.storages, app.config)
+    worker.start()
+    return worker

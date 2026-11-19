@@ -20,6 +20,12 @@ class SmbStorage:
     """Читает и записывает файлы на удалённой Samba через SMB2/SMB3."""
 
     def __init__(self, root: str, username: str, password: str):
+        """Проверяет UNC-адрес Samba и сохраняет параметры подключения.
+
+        root задаёт сервер, шару и необязательную папку внутри неё.
+        Сетевое соединение smbclient откроет при первой операции с файлом.
+        """
+
         root = root.replace("/", "\\").rstrip("\\")
         if not root.startswith("\\\\") or len(root[2:].split("\\")) < 2:
             raise ValueError("BATCH_SMB_ROOT должен иметь вид //сервер/шара или //сервер/шара/папка")
@@ -29,6 +35,12 @@ class SmbStorage:
         self.options = {"username": username, "password": password, "connection_timeout": 15}
 
     def _path(self, key: str) -> str:
+        """Собирает полный UNC-путь для относительного ключа из ZIP.
+
+        Перед добавлением имени проверяет промежуточные каталоги на
+        симлинки. Полученный путь используется для запросов к Samba.
+        """
+
         *parents, filename = key_parts(key)
         path = self.root
         for parent in parents:
@@ -55,6 +67,14 @@ class SmbStorage:
         return True
 
     def put_if_absent(self, key: str, source: BinaryIO, *, size: int) -> WriteResult:
+        """Пишет распакованный поток в Samba и возвращает результат записи.
+
+        Проверяет целевой путь, создаёт нужные папки и копирует байты
+        во временный файл. После сверки размера атомарно публикует его
+        через rename. Возвращает uploaded для новой записи или exists
+        при занятом пути. При сбое пытается удалить временный файл.
+        """
+
         target = self._path(key)
         if self._existing_file(target):
             # Сейчас признак дубля — существование файла по тому же ключу.
@@ -95,6 +115,12 @@ class SmbStorage:
                         log.warning("Не удалось удалить временный файл Samba %s", temporary, exc_info=True)
 
     def open_read(self, key: str) -> BinaryIO:
+        """Открывает готовый файл Samba в двоичном режиме для скачивания.
+
+        Приводит отсутствие файла к FileNotFoundError, а сбои SMB —
+        к OSError. API использует их, чтобы вернуть 404 или 503.
+        """
+
         try:
             target = self._path(key)
             if not self._existing_file(target):

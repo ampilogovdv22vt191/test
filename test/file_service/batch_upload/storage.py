@@ -34,7 +34,12 @@ class Storage(Protocol):
 
 
 def key_parts(key: str) -> list[str]:
-    """Разбирает безопасный относительный ключ и проверяет имена для SMB."""
+    """Разбивает ключ вида каталог/файл на безопасные части пути.
+
+    Проверяет каждый компонент. Запрещает абсолютные пути, переходы
+    через .., служебный префикс временных файлов и символы, недопустимые
+    для этого адаптера. При нарушении поднимает ValueError.
+    """
 
     parts = key.split("/")
     if any(
@@ -49,7 +54,12 @@ def key_parts(key: str) -> list[str]:
 
 
 def rename_without_replace(source: Path, target: Path) -> None:
-    """Публикует готовый файл атомарным переименованием без перезаписи."""
+    """Атомарно публикует временный файл под целевым именем.
+
+    Вызывает системную операцию Linux или macOS, которая сохраняет уже
+    существующий целевой файл. При конфликте или другом сбое поднимает
+    OSError с кодом системы, чтобы адаптер мог обработать результат.
+    """
 
     # На Linux, в том числе для CIFS, используется RENAME_NOREPLACE.
     # На macOS ту же гарантию даёт RENAME_EXCL.
@@ -74,11 +84,15 @@ class MountedStorage:
     """Хранилище поверх локального каталога или примонтированной SMB-шары."""
 
     def __init__(self, root: str | Path):
+        """Сохраняет абсолютный путь к существующей директории хранилища."""
+
         self.root = Path(root).resolve(strict=True)
         if not self.root.is_dir():
             raise NotADirectoryError(self.root)
 
     def _path(self, key: str) -> Path:
+        """Преобразует ключ в путь под root и проверяет компоненты на симлинки."""
+
         target = self.root
         for part in key_parts(key):
             target = target / part
@@ -88,6 +102,14 @@ class MountedStorage:
         return target
 
     def put_if_absent(self, key: str, source: BinaryIO, *, size: int) -> WriteResult:
+        """Записывает входной поток в каталог с сохранением структуры ключа.
+
+        Если обычный файл уже есть, возвращает exists. Иначе пишет во
+        временный файл, сверяет размер и переименовывает без перезаписи.
+        Возвращает uploaded после публикации и убирает временную копию
+        при конфликте или ошибке.
+        """
+
         target = self._path(key)
         if target.is_file():
             return "exists"
@@ -116,6 +138,8 @@ class MountedStorage:
                 temporary.unlink(missing_ok=True)
 
     def open_read(self, key: str) -> BinaryIO:
+        """Открывает обычный файл в двоичном режиме для потокового скачивания."""
+
         path = self._path(key)
         if not path.is_file():
             raise FileNotFoundError(path)

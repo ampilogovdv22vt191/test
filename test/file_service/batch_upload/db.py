@@ -13,6 +13,8 @@ READABLE = ("uploaded", "exists")
 
 
 def now() -> datetime:
+    """Возвращает текущее время UTC с часовым поясом для записей и сроков хранения."""
+
     return datetime.now(timezone.utc)
 
 
@@ -76,11 +78,22 @@ class Revision(Base):
 
 class Database:
     def __init__(self, url):
+        """Создаёт движок PostgreSQL и фабрику независимых сессий.
+
+        SQLAlchemy берёт подключения из пула по мере использования.
+        pool_pre_ping проверяет соединение, когда движок берёт его из пула.
+        """
+
         self.engine = create_engine(url, pool_pre_ping=True)
         self.session = sessionmaker(self.engine)
 
     def init_schema(self) -> None:
-        """Создаёт таблицы и начальную ревизию при первом запуске."""
+        """Создаёт недостающие таблицы и начальную строку ревизии SSE.
+
+        Использует описания таблиц из моделей. Строка id=1 создаётся
+        со значением 0 только при первом запуске. Дальше API и воркер
+        увеличивают её при каждом изменении видимого состояния.
+        """
 
         from sqlalchemy.dialects.postgresql import insert
 
@@ -89,7 +102,12 @@ class Database:
             conn.execute(insert(Revision).values(id=1, value=0).on_conflict_do_nothing())
 
     def delete_expired_jobs(self, retention_hours: int) -> int:
-        """Удаляет завершённые задачи и их строки файлов по сроку хранения."""
+        """Удаляет задачи, срок хранения которых истёк после finished_at.
+
+        В выборку попадают завершённые задачи. Связанные строки
+        batch_files удаляет PostgreSQL через внешний ключ. Если были
+        удаления, меняет ревизию SSE. Возвращает число удалённых задач.
+        """
 
         cutoff = now() - timedelta(hours=retention_hours)
         with self.session.begin() as session:
@@ -105,6 +123,10 @@ class Database:
 
 
 def bump_revision(session) -> None:
-    """Меняет ревизию в той же транзакции, что и статус задачи или файла."""
+    """Увеличивает счётчик изменений SSE в переданной транзакции.
+
+    Фронтенд получает уведомление только после фиксации той же транзакции,
+    которая изменила задачу, файл или историю.
+    """
 
     session.execute(update(Revision).where(Revision.id == 1).values(value=Revision.value + 1))
