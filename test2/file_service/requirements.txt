@@ -1,8 +1,0 @@
-Flask==2.2.5
-Werkzeug==2.3.8
-Flask-Cors>=4,<7
-Flask-RESTful==0.3.10
-SQLAlchemy>=2.0,<2.1
-psycopg[binary]>=3.2,<4
-smbprotocol>=1.15,<2
-gunicorn>=23,<27
